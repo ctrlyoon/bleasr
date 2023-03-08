@@ -31,10 +31,10 @@ class CharacteristicWriteRequestCallback(private val context: Context, private v
     private var audioThread: Thread? = null
     
     override fun onCharacteristicWriteRequest(device: BluetoothDevice,requestId: Int,characteristic: BluetoothGattCharacteristic,preparedWrite: Boolean,responseNeeded: Boolean,offset: Int,value: ByteArray) {
-        Log.d(TAG,"onCharacteristicWriteRequest: device=$device, requestId=$requestId, characteristic=$characteristic, preparedWrite=$preparedWrite, responseNeeded=$responseNeeded, offset=$offset, value=${String(value)}")
+        Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber,"onCharacteristicWriteRequest: device=$device, requestId=$requestId, characteristic=$characteristic, preparedWrite=$preparedWrite, responseNeeded=$responseNeeded, offset=$offset, value=${String(value)}")
         when (characteristic.uuid) {
             serviceUUID -> {
-                Log.d(TAG, "Received Audio Gateway Control Point Command: ${value[0]}")
+                Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "Received Audio Gateway Control Point Command: ${value[0]}")
                 if (value.isNotEmpty() && value[0] == '1'.code.toByte()) {
                     // Use the member variable tts instead of declaring a new one
                     tts = TextToSpeech(context) { status ->
@@ -60,11 +60,11 @@ class CharacteristicWriteRequestCallback(private val context: Context, private v
                 }
             }
             incomingCallUUID -> {
-                Log.d(TAG, "Received Response Code Command: ${value[0]}")
+                Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "Received Response Code Command: ${value[0]}")
                 // Handle response code commands here
             }
             audioUUID -> {
-                Log.d(TAG, "Received Audio Command: ${value.size} bytes")
+                Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "Received Audio Command: ${value.size} bytes")
                 if (value.isNotEmpty() && value[0] == '1'.code.toByte()) {
                     // Create the AudioRecord object and start the recording thread
                     audioData = ByteArray(recordBufferSize)
@@ -97,7 +97,7 @@ class CharacteristicWriteRequestCallback(private val context: Context, private v
                 }
             }
             else -> {
-                Log.d(TAG, "Unknown characteristic write request")
+                Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "Unknown characteristic write request")
                 if (responseNeeded) {
                     if (ActivityCompat.checkSelfPermission(context,BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
                         return

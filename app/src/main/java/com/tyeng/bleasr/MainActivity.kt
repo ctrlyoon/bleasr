@@ -20,9 +20,7 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.tyeng.bleasr.gatthelper.GATTServerService
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -31,7 +29,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         val TAG = "mike_" + Thread.currentThread().stackTrace[2].className + " "
         lateinit var logTextView: TextView
-        var logLineCount = 0
         fun log(message: String) {
             val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
             val formattedDate = dateFormat.format(Date())
@@ -43,8 +40,6 @@ class MainActivity : AppCompatActivity() {
                 logTextView.text = logTextView.text.substring(indexOfNewLine + 1)
             }
         }
-        const val CHANNEL_ID = "asrChannel"
-        const val NOTIFICATION_ID = 1
     }
 
     private val roleManager: RoleManager? by lazy {
@@ -101,12 +96,12 @@ class MainActivity : AppCompatActivity() {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // start the service as a foreground service for devices running Android Oreo or higher
-            Log.d(TAG, "Starting foreground service >= Build.VERSION_CODES.O")
+            Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "Starting foreground service >= Build.VERSION_CODES.O")
             startForegroundService(Intent(this, CallService::class.java))
             startForegroundService(Intent(this, GATTServerService::class.java))
         } else {
             // start the service as a background service for devices running Android Nougat or lower
-            Log.d(TAG, "Starting background service")
+            Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "Starting background service")
             startService(Intent(this, CallService::class.java))
             startService(Intent(this, GATTServerService::class.java))
         }

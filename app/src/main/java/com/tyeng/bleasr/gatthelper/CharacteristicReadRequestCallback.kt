@@ -16,7 +16,7 @@ class CharacteristicReadRequestCallback(private val context: Context, private va
     private val sttUUID = UUID.fromString("0000dddd-0000-1000-8000-00805f9b34fb")
 
     override fun onCharacteristicReadRequest(device: BluetoothDevice, requestId: Int, offset: Int, characteristic: BluetoothGattCharacteristic) {
-        Log.d(TAG, "onCharacteristicReadRequest: device=$device, requestId=$requestId, offset=$offset, characteristic=$characteristic")
+        Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "onCharacteristicReadRequest: device=$device, requestId=$requestId, offset=$offset, characteristic=$characteristic")
         when (characteristic.uuid) {
             sttUUID -> {
                 // Convert the STT data to bytes and send it to the client
@@ -39,7 +39,7 @@ class CharacteristicReadRequestCallback(private val context: Context, private va
                 gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
             }
             else -> {
-                Log.d(TAG, "Unknown characteristic read request")
+                Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "Unknown characteristic read request")
                 gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null)
             }
         }
