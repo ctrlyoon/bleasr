@@ -2,8 +2,6 @@ package com.tyeng.bleasr
 
 import android.Manifest
 import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.Service
 import android.bluetooth.*
 import android.content.BroadcastReceiver
@@ -14,13 +12,15 @@ import android.content.pm.PackageManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
-import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.app.ActivityCompat
+import com.tyeng.bleasr.gatthelper.CharacteristicReadRequestCallback
+import com.tyeng.bleasr.gatthelper.CharacteristicWriteRequestCallback
 import java.util.*
 
 class GATTServerService : Service() {
+
     companion object {
         val TAG = "mike_" + Thread.currentThread().stackTrace[2].className + " "
     }
@@ -30,24 +30,129 @@ class GATTServerService : Service() {
         }
 
     private val binder = LocalBinder()
-    private lateinit var bluetoothManager: BluetoothManager
-    private lateinit var bluetoothAdapter: BluetoothAdapter
-    private lateinit var gattServer: BluetoothGattServer
-    private lateinit var incomingCallCharacteristic: BluetoothGattCharacteristic
-    private lateinit var tts: TextToSpeech
 
+    private lateinit var gattServer: BluetoothGattServer
+    private var bluetoothAdapter: BluetoothAdapter? = null
+    private var bluetoothManager: BluetoothManager? = null
+    private var connectedDevice: BluetoothGatt? = null
+
+    private val sttUUID = UUID.fromString("0000dddd-0000-1000-8000-00805f9b34fb")
     private val serviceUUID = UUID.fromString("0000aaaa-0000-1000-8000-00805f9b34fb")
     private val incomingCallUUID = UUID.fromString("0000bbbb-0000-1000-8000-00805f9b34fb")
+    private val audioUUID = UUID.fromString("0000cccc-0000-1000-8000-00805f9b34fb")
 
-    private var connectedDevice: BluetoothDevice? = null
+    override fun onBind(intent: Intent?): IBinder {
+        return binder
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        Log.d(TAG, "onCreate")
+        initialize()
+        registerReceiver(answerCallReceiver, IntentFilter("com.tyeng.bleasr.ANSWER_CALL"))
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Log.d(TAG, "onDestroy")
+        stopServer()
+    }
+
+    private fun initialize() {
+        Log.d(TAG, "initialize")
+        bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        bluetoothAdapter = bluetoothManager?.adapter
+        if (ActivityCompat.checkSelfPermission(this,Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // here to request the missing permissions, and then overriding
+            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            //                                          int[] grantResults)
+            // to handle the case where the user grants the permission. See the documentation
+            // for ActivityCompat#requestPermissions for more details.
+            return
+        }
+        gattServer = bluetoothManager!!.openGattServer(applicationContext, gattServerCallback)
+        addServices()
+    }
+
+    private fun addServices() {
+        Log.d(TAG, "addServices")
+        // Add the STT service
+        val sttService = BluetoothGattService(sttUUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+        val sttCharacteristic = BluetoothGattCharacteristic(
+            sttUUID,
+            BluetoothGattCharacteristic.PROPERTY_READ,
+            BluetoothGattCharacteristic.PERMISSION_READ
+        )
+        sttService.addCharacteristic(sttCharacteristic)
+        if (ActivityCompat.checkSelfPermission(this,Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // here to request the missing permissions, and then overriding
+            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            //                                          int[] grantResults)
+            // to handle the case where the user grants the permission. See the documentation
+            // for ActivityCompat#requestPermissions for more details.
+            return
+        }
+        gattServer.addService(sttService)
+
+        // Add the Audio Gateway service
+        val service = BluetoothGattService(serviceUUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+
+        // Add the Incoming Call characteristic
+        val incomingCallCharacteristic = BluetoothGattCharacteristic(
+            incomingCallUUID,
+            BluetoothGattCharacteristic.PROPERTY_WRITE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE
+        )
+        service.addCharacteristic(incomingCallCharacteristic)
+
+        // Add the Audio characteristic
+        val audioCharacteristic = BluetoothGattCharacteristic(
+            audioUUID,
+            BluetoothGattCharacteristic.PROPERTY_WRITE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE
+        )
+        service.addCharacteristic(audioCharacteristic)
+
+        gattServer.addService(service)
+    }
+
+    private fun stopServer() {
+        Log.d(TAG, "stopServer")
+        if (bluetoothAdapter?.isEnabled == true) {
+            if (connectedDevice != null) {
+                if (ActivityCompat.checkSelfPermission(this,Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
+                    // TODO: Consider calling
+                    //    ActivityCompat#requestPermissions
+                    // here to request the missing permissions, and then overriding
+                    //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                    //                                          int[] grantResults)
+                    // to handle the case where the user grants the permission. See the documentation
+                    // for ActivityCompat#requestPermissions for more details.
+                    return
+                }
+                connectedDevice?.disconnect()
+                connectedDevice = null
+            }
+            gattServer.close()
+        }
+    }
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
+        private val connectedDevices = mutableListOf<BluetoothDevice>()
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
-            Log.d(TAG,"onConnectionStateChange: device=$device, status=$status, newState=$newState")
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
-                connectedDevice = device
-            } else {
-                connectedDevice = null
+            super.onConnectionStateChange(device, status, newState)
+            Log.d(TAG, "onConnectionStateChange: device=$device, status=$status, newState=$newState")
+            when (newState) {
+                BluetoothProfile.STATE_CONNECTED -> {
+                    connectedDevices.add(device)
+                }
+                BluetoothProfile.STATE_DISCONNECTED -> {
+                    connectedDevices.remove(device)
+                }
             }
         }
 
@@ -57,86 +162,39 @@ class GATTServerService : Service() {
             offset: Int,
             characteristic: BluetoothGattCharacteristic
         ) {
-            Log.d(TAG,"onCharacteristicReadRequest: device=$device, requestId=$requestId, offset=$offset, characteristic=$characteristic")
-            when (characteristic.uuid) {
-                incomingCallUUID -> {
-                    if (offset == 0) {
-                        val value = if (connectedDevice != null) {
-                            "1".toByteArray()
-                        } else {
-                            "0".toByteArray()
-                        }
-                        if (ActivityCompat.checkSelfPermission(
-                                applicationContext,
-                                Manifest.permission.BLUETOOTH_CONNECT
-                            ) != PackageManager.PERMISSION_GRANTED
-                        ) {
-                            // TODO: Consider calling
-                            //    ActivityCompat#requestPermissions
-                            // here to request the missing permissions, and then overriding
-                            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                            //                                          int[] grantResults)
-                            // to handle the case where the user grants the permission. See the documentation
-                            // for ActivityCompat#requestPermissions for more details.
-                            return
-                        }
-                        gattServer.sendResponse(
-                            device,
-                            requestId,
-                            BluetoothGatt.GATT_SUCCESS,
-                            0,
-                            value
-                        )
-                    } else {
-                        gattServer.sendResponse(
-                            device,
-                            requestId,
-                            BluetoothGatt.GATT_INVALID_OFFSET,
-                            0,
-                            null
-                        )
-                    }
-                }
-                else -> {
-                    gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
-                }
-            }
+            CharacteristicReadRequestCallback(
+                applicationContext,
+                gattServer
+            ).onCharacteristicReadRequest(device, requestId, offset, characteristic)
         }
 
-        override fun onCharacteristicWriteRequest(
-            device: BluetoothDevice,
-            requestId: Int,
-            characteristic: BluetoothGattCharacteristic,
-            preparedWrite: Boolean,
-            responseNeeded: Boolean,
-            offset: Int,
-            value: ByteArray
-        ) {
-            Log.d(TAG,"onCharacteristicWriteRequest: device=$device, requestId=$requestId, characteristic=$characteristic, preparedWrite=$preparedWrite, responseNeeded=$responseNeeded, offset=$offset, value=${String(value)}")
-            if (characteristic.uuid == incomingCallUUID) {
-                if (value.isNotEmpty() && value[0] == '1'.toByte()) {
+        override fun onCharacteristicWriteRequest(device: BluetoothDevice,requestId: Int,characteristic: BluetoothGattCharacteristic,preparedWrite: Boolean,responseNeeded: Boolean,offset: Int,value: ByteArray) {
+            CharacteristicWriteRequestCallback(
+                applicationContext,
+                gattServer
+            ).onCharacteristicWriteRequest(
+                device,
+                requestId,
+                characteristic,
+                preparedWrite,
+                responseNeeded,
+                offset,
+                value
+            )
+        }
 
+    }
+
+    private val gattCallback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            super.onConnectionStateChange(gatt, status, newState)
+            Log.d(TAG, "onConnectionStateChange: status=$status, newState=$newState")
+            when (newState) {
+                BluetoothProfile.STATE_CONNECTED -> {
+                    connectedDevice = gatt
                 }
-                if (responseNeeded) {
-                    if (ActivityCompat.checkSelfPermission(
-                            applicationContext,
-                            Manifest.permission.BLUETOOTH_CONNECT
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        // TODO: Consider calling
-                        //    ActivityCompat#requestPermissions
-                        // here to request the missing permissions, and then overriding
-                        //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                        //                                          int[] grantResults)
-                        // to handle the case where the user grants the permission. See the documentation
-                        // for ActivityCompat#requestPermissions for more details.
-                        return
-                    }
-                    gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
-                }
-            } else {
-                if (responseNeeded) {
-                    gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
+                BluetoothProfile.STATE_DISCONNECTED -> {
+                    connectedDevice = null
                 }
             }
         }
@@ -157,86 +215,13 @@ class GATTServerService : Service() {
                 MainActivity.log("음성안내 준비중")
                 Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber,"GATTServerService onReceive")
                 // Use the member variable tts instead of declaring a new one
-                tts = TextToSpeech(context) { status ->
-                    if (status == TextToSpeech.SUCCESS) {
-                        tts.speak("Hi, this is TYEng", TextToSpeech.QUEUE_FLUSH, null, null)
-                    }
-                }
+//                tts = TextToSpeech(context) { status ->
+//                    if (status == TextToSpeech.SUCCESS) {
+//                        tts.speak("Hi, this is TYEng", TextToSpeech.QUEUE_FLUSH, null, null)
+//                    }
+//                }
             }
         }
-    }
-
-
-    @RequiresApi(Build.VERSION_CODES.O)
-    override fun onCreate() {
-        super.onCreate()
-        Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "onCreate")
-        registerReceiver(answerCallReceiver, IntentFilter("com.tyeng.bleasr.ANSWER_CALL"))
-        bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        bluetoothAdapter = bluetoothManager.adapter
-
-        // Create the incoming call characteristic
-        Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "onCreate incoming call characteristic")
-        val incomingCallProperties =
-            BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE
-        val incomingCallPermissions =
-            BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE
-        incomingCallCharacteristic = BluetoothGattCharacteristic(
-            incomingCallUUID,
-            incomingCallProperties,
-            incomingCallPermissions
-        )
-
-        // Create the service
-        Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "onCreate the service")
-        val service = BluetoothGattService(serviceUUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
-        service.addCharacteristic(incomingCallCharacteristic)
-
-        // Create the GATT server
-        if (ActivityCompat.checkSelfPermission(this,Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
-            Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "no BLUETOOTH_CONNECT permission")
-            // TODO: Consider calling
-            //    ActivityCompat#requestPermissions
-            // here to request the missing permissions, and then overriding
-            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            //                                          int[] grantResults)
-            // to handle the case where the user grants the permission. See the documentation
-            // for ActivityCompat#requestPermissions for more details.
-            return
-        }
-        gattServer = bluetoothManager.openGattServer(this, gattServerCallback)
-        gattServer.addService(service)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Create the NotificationChannel with unique ID and name
-            val channel = NotificationChannel("gattNofificationId","Gatt Channel",NotificationManager.IMPORTANCE_DEFAULT)
-            channel.description = "GATT Notification Channel"
-            // Register the channel with the system
-            val notificationManager =
-                getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
-        }
-        Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "onCreate started gattServer")
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "onDestroy")
-        if (ActivityCompat.checkSelfPermission(this,Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
-            Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "no BLUETOOTH_CONNECT permission")
-            // TODO: Consider calling
-            //    ActivityCompat#requestPermissions
-            // here to request the missing permissions, and then overriding
-            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            //                                          int[] grantResults)
-            // to handle the case where the user grants the permission. See the documentation
-            // for ActivityCompat#requestPermissions for more details.
-            return
-        }
-        gattServer.close()
-        unregisterReceiver(answerCallReceiver)    }
-
-    override fun onBind(intent: Intent?): IBinder? {
-        return binder
     }
 
     inner class LocalBinder : Binder() {

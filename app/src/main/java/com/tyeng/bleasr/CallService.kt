@@ -29,18 +29,19 @@ class CallService : InCallService() {
     @RequiresApi(VERSION_CODES.O)
     override fun onCreate() {
         super.onCreate()
-        if (Build.VERSION.SDK_INT >= VERSION_CODES.O) {
-            // Create the NotificationChannel with unique ID and name
-            val channel = NotificationChannel("callNotificationId", "Call Channel", NotificationManager.IMPORTANCE_DEFAULT)
-            channel.description = "Call Notification Channel"
-            // Register the channel with the system
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
-        }
-
+        val channelId = "callNotificationId"
+        val channelName = "Call Channel"
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channel = NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_HIGH)
+        channel.description = "Call Notification Channel"
+        notificationManager.createNotificationChannel(channel)
+        val notificationBuilder = Notification.Builder(this, channelId)
+            .setContentTitle("BLEASR Service")
+            .setContentText("Running")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+        startForeground(notificationId, notificationBuilder.build())
         Log.d(TAG + " " + Thread.currentThread().stackTrace[2].lineNumber, "onCreate")
     }
-
 
     override fun onDestroy() {
         super.onDestroy()
